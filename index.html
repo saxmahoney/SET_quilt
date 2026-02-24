@@ -7,8 +7,9 @@
         :root { 
             --line-color: #333; 
             --highlight: #ffeb3b; 
-            --new-card: #c8e6c9; 
+            --user-placed: #28a745;
             --bg: #f8f9fa;
+            --anim-speed: 1000ms; /* Dynamic duration */
         }
         body { 
             font-family: 'Segoe UI', sans-serif; 
@@ -35,16 +36,40 @@
             justify-content: center; 
             align-items: center; 
             cursor: pointer; 
-            border: 1px solid #eee; 
+            border: 0px solid transparent; 
             transition: background 0.3s; 
+            box-sizing: border-box;
+            position: relative;
         }
+
         .cell.selected { outline: 4px solid #007bff; z-index: 10; }
         .cell.forcing { background: var(--highlight) !important; }
-        .cell.newly-added { background: var(--new-card); animation: cardFadeIn 0.6s ease-out; }
+        
+        /* Prominent Green Border for User Placed */
+        .cell.user-placed { 
+            border: 8px solid var(--user-placed) !important; 
+        }
+
+        /* Receding Yellow Border Animation */
+        .cell.newly-added::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            border: 30px solid var(--highlight);
+            pointer-events: none;
+            animation: recedingBorder var(--anim-speed) ease-out forwards;
+            z-index: 5;
+        }
+        
+        @keyframes recedingBorder {
+            0% { border-width: 35px; opacity: 1; }
+            50% { border-width: 8px; opacity: 1; }
+            100% { border-width: 0px; opacity: 0; }
+        }
         
         /* 3x3 Block Visuals */
         .cell:nth-child(3n) { border-right: 3px solid var(--line-color); }
-        .cell:nth-child(9n) { border-right: 1px solid #eee; }
+        .cell:nth-child(9n) { border-right: none; }
         .cell:nth-child(n+19):nth-child(-n+27), 
         .cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 3px solid var(--line-color); }
 
@@ -71,7 +96,6 @@
         }
 
         svg { width: 70px; height: 90px; }
-        @keyframes cardFadeIn { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } }
     </style>
 </head>
 <body>
@@ -82,7 +106,7 @@
     <div class="controls">
         <h2 style="margin-top:0">Super Quilt</h2>
         <label>Propagation Speed</label>
-        <input type="range" id="speed" min="50" max="1500" value="400">
+        <input type="range" id="speed" min="100" max="2000" value="600">
         <button onclick="location.reload()" style="background:#6c757d; margin-top:10px;">Reset Grid</button>
     </div>
     <div id="deck" class="deck-view"></div>
@@ -94,13 +118,9 @@
     let gridSets = {};
     let isPropagating = false;
 
-    // Refined Paths to match standard SET visuals
     const PATHS = [
-        // Oval (Pill)
         "M 10,12 H 30 A 8,8 0 0 1 30,28 H 10 A 8,8 0 0 1 10,12 Z",
-        // Squiggle (Classical Wave)
         "M 35.1 14.2 C 37.9 20.2, 30.3 26.7, 21.4 24.8 C 17.8 24.1, 14.4 21.5, 9.4 24.5 C 3.5 28.0, 2.1 26.0, 2.0 21.0 C 1.9 16.1, 6.7 12.8, 12.4 13.4 C 20.1 14.3, 21.1 18.7, 30.1 13.9 C 32.2 12.8, 34.1 12.0, 35.1 14.2 Z",
-        // Diamond
         "M 20,8 L 36,20 L 20,32 L 4,20 Z"
     ];
     const COLORS = ["#ef233c", "#7209b7", "#38b000"];
@@ -116,7 +136,6 @@
         if (shadeIdx === 2) fill = "none";
 
         let shapes = "";
-        // Spacing logic
         const offsets = count === 1 ? [25] : count === 2 ? [10, 40] : [-5, 25, 55];
         
         offsets.forEach(y => {
@@ -124,7 +143,7 @@
         });
 
         return `
-            <svg viewBox="0 0 40 90">
+            <svg viewBox="0 0 40 95">
                 <defs>
                     <pattern id="stripes-${colorIdx}" patternUnits="userSpaceOnUse" width="3" height="3" patternTransform="rotate(45)">
                         <line x1="0" y1="0" x2="0" y2="3" stroke="${color}" stroke-width="1.2" />
@@ -193,38 +212,63 @@
 
     async function placeCard(card, pos) {
         grid[pos] = card;
-        document.getElementById(`cell-${pos}`).innerHTML = getCardSVG(card);
+        const cell = document.getElementById(`cell-${pos}`);
+        cell.innerHTML = getCardSVG(card);
+        cell.classList.add('user-placed');
         renderDeck();
         selectedCell = null;
-        await propagate();
+        await propagate([{card: card, pos: pos}]);
     }
 
-    async function propagate() {
+    async function propagate(initialQueue) {
         isPropagating = true;
-        let queue = [];
-        for (let i=0; i<81; i++) if (grid[i]) queue.push({card: grid[i], pos: i});
+        let queue = initialQueue;
+        
+        const getDelay = () => parseInt(document.getElementById('speed').value);
 
         while (queue.length > 0) {
             let {card, pos} = queue.shift();
             for (let set of gridSets[pos]) {
                 let cardB = grid[set.posB], cardC = grid[set.posC];
                 let target = null, partner = null;
+                
                 if (cardB && !cardC) { target = set.posC; partner = set.posB; }
                 else if (!cardB && cardC) { target = set.posB; partner = set.posC; }
 
                 if (target !== null) {
                     const cA = document.getElementById(`cell-${pos}`), cB = document.getElementById(`cell-${partner}`);
-                    cA.classList.add('forcing'); cB.classList.add('forcing');
-                    await new Promise(r => setTimeout(r, document.getElementById('speed').value));
+                    const delay = getDelay();
+                    const animTime = delay * 2; // Animation duration proportional to speed
+
+                    // Set dynamic animation speed in CSS
+                    document.documentElement.style.setProperty('--anim-speed', `${animTime}ms`);
+
+                    // 1. Highlight the forcing pair
+                    cA.classList.add('forcing'); 
+                    cB.classList.add('forcing');
+                    
+                    // 2. Wait based on speed before revealing third card
+                    await new Promise(r => setTimeout(r, delay));
                     
                     const third = grid[pos].map((v, i) => (6 - (v + grid[partner][i])) % 3);
                     grid[target] = third;
                     const tCell = document.getElementById(`cell-${target}`);
                     tCell.innerHTML = getCardSVG(third);
+                    
+                    // 3. Trigger receding border
+                    tCell.classList.remove('newly-added');
+                    void tCell.offsetWidth; 
                     tCell.classList.add('newly-added');
                     
                     renderDeck();
-                    cA.classList.remove('forcing'); cB.classList.remove('forcing');
+                    
+                    // 4. WAIT for the "fading in" (receding) to finish before un-highlighting and moving to next
+                    await new Promise(r => setTimeout(r, animTime));
+
+                    cA.classList.remove('forcing'); 
+                    cB.classList.remove('forcing');
+                    
+                    // Add newly forced card to queue to check its own potential sets
                     queue.push({card: third, pos: target});
                 }
             }
