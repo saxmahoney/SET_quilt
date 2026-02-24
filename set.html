@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SET Super Quilt Generator</title>
+    <style>
+        :root { 
+            --line-color: #333; 
+            --highlight: #ffeb3b; 
+            --new-card: #c8e6c9; 
+            --bg: #f8f9fa;
+        }
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            display: flex; 
+            flex-direction: row; 
+            gap: 30px; 
+            background: var(--bg); 
+            padding: 30px; 
+            justify-content: center;
+        }
+        
+        #grid-container { 
+            display: grid; 
+            grid-template-columns: repeat(9, 85px); 
+            grid-template-rows: repeat(9, 105px); 
+            gap: 2px; 
+            background: #999; 
+            border: 5px solid var(--line-color);
+            box-shadow: 0 12px 30px rgba(0,0,0,0.15);
+        }
+        .cell { 
+            background: white; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            cursor: pointer; 
+            border: 1px solid #eee; 
+            transition: background 0.3s; 
+        }
+        .cell.selected { outline: 4px solid #007bff; z-index: 10; }
+        .cell.forcing { background: var(--highlight) !important; }
+        .cell.newly-added { background: var(--new-card); animation: cardFadeIn 0.6s ease-out; }
+        
+        /* 3x3 Block Visuals */
+        .cell:nth-child(3n) { border-right: 3px solid var(--line-color); }
+        .cell:nth-child(9n) { border-right: 1px solid #eee; }
+        .cell:nth-child(n+19):nth-child(-n+27), 
+        .cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 3px solid var(--line-color); }
+
+        .sidebar { width: 340px; display: flex; flex-direction: column; gap: 20px; }
+        .controls { 
+            background: white; padding: 20px; border-radius: 12px; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1); 
+        }
+        .deck-view { 
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; 
+            overflow-y: auto; max-height: 60vh; background: white; 
+            padding: 15px; border-radius: 12px; border: 1px solid #ddd; 
+        }
+        .deck-card { 
+            padding: 8px; border: 1px solid #eee; cursor: pointer; 
+            border-radius: 6px; display: flex; justify-content: center;
+        }
+        .deck-card.used { opacity: 0.1; cursor: not-allowed; filter: grayscale(1); }
+        
+        input[type=range] { width: 100%; margin: 10px 0; }
+        button { 
+            width: 100%; padding: 10px; background: #007bff; color: white; 
+            border: none; border-radius: 6px; font-weight: bold; cursor: pointer;
+        }
+
+        svg { width: 70px; height: 90px; }
+        @keyframes cardFadeIn { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } }
+    </style>
+</head>
+<body>
+
+<div id="grid-container"></div>
+
+<div class="sidebar">
+    <div class="controls">
+        <h2 style="margin-top:0">Super Quilt</h2>
+        <label>Propagation Speed</label>
+        <input type="range" id="speed" min="50" max="1500" value="400">
+        <button onclick="location.reload()" style="background:#6c757d; margin-top:10px;">Reset Grid</button>
+    </div>
+    <div id="deck" class="deck-view"></div>
+</div>
+
+<script>
+    let grid = Array(81).fill(null);
+    let selectedCell = null;
+    let gridSets = {};
+    let isPropagating = false;
+
+    // Refined Paths to match standard SET visuals
+    const PATHS = [
+        // Oval (Pill)
+        "M 10,12 H 30 A 8,8 0 0 1 30,28 H 10 A 8,8 0 0 1 10,12 Z",
+        // Squiggle (Classical Wave)
+        "M 35.1 14.2 C 37.9 20.2, 30.3 26.7, 21.4 24.8 C 17.8 24.1, 14.4 21.5, 9.4 24.5 C 3.5 28.0, 2.1 26.0, 2.0 21.0 C 1.9 16.1, 6.7 12.8, 12.4 13.4 C 20.1 14.3, 21.1 18.7, 30.1 13.9 C 32.2 12.8, 34.1 12.0, 35.1 14.2 Z",
+        // Diamond
+        "M 20,8 L 36,20 L 20,32 L 4,20 Z"
+    ];
+    const COLORS = ["#ef233c", "#7209b7", "#38b000"];
+
+    function getCardSVG(card) {
+        const [shapeIdx, colorIdx, numIdx, shadeIdx] = card;
+        const color = COLORS[colorIdx];
+        const path = PATHS[shapeIdx];
+        const count = numIdx + 1;
+        
+        let fill = color;
+        if (shadeIdx === 1) fill = `url(#stripes-${colorIdx})`;
+        if (shadeIdx === 2) fill = "none";
+
+        let shapes = "";
+        // Spacing logic
+        const offsets = count === 1 ? [25] : count === 2 ? [10, 40] : [-5, 25, 55];
+        
+        offsets.forEach(y => {
+            shapes += `<path d="${path}" transform="translate(0, ${y})" fill="${fill}" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" />`;
+        });
+
+        return `
+            <svg viewBox="0 0 40 90">
+                <defs>
+                    <pattern id="stripes-${colorIdx}" patternUnits="userSpaceOnUse" width="3" height="3" patternTransform="rotate(45)">
+                        <line x1="0" y1="0" x2="0" y2="3" stroke="${color}" stroke-width="1.2" />
+                    </pattern>
+                </defs>
+                ${shapes}
+            </svg>`;
+    }
+
+    function cardToGridIdx(card) {
+        const [R, C, r, c] = card;
+        return (3 * R + r) * 9 + (3 * C + c);
+    }
+
+    function init() {
+        const fullDeck = [];
+        for (let R=0; R<3; R++) for (let C=0; C<3; C++) 
+        for (let r=0; r<3; r++) for (let c=0; c<3; c++) fullDeck.push([R, C, r, c]);
+
+        fullDeck.forEach((A, i) => {
+            let posA = cardToGridIdx(A);
+            gridSets[posA] = [];
+            fullDeck.forEach((B, j) => {
+                if (i === j) return;
+                let C = A.map((val, k) => (6 - (val + B[k])) % 3);
+                if (B.join('') < C.join('')) {
+                    gridSets[posA].push({posB: cardToGridIdx(B), posC: cardToGridIdx(C)});
+                }
+            });
+        });
+        renderGrid();
+        renderDeck();
+    }
+
+    function renderGrid() {
+        const container = document.getElementById('grid-container');
+        container.innerHTML = '';
+        for (let i=0; i<81; i++) {
+            const div = document.createElement('div');
+            div.className = 'cell';
+            div.id = `cell-${i}`;
+            div.onclick = () => {
+                if (grid[i] || isPropagating) return;
+                document.querySelectorAll('.cell').forEach(c => c.classList.remove('selected'));
+                div.classList.add('selected');
+                selectedCell = i;
+            };
+            container.appendChild(div);
+        }
+    }
+
+    function renderDeck() {
+        const deckDiv = document.getElementById('deck');
+        deckDiv.innerHTML = '';
+        for (let R=0; R<3; R++) for (let C=0; C<3; C++) 
+        for (let r=0; r<3; r++) for (let c=0; c<3; c++) {
+            const card = [R, C, r, c];
+            const used = grid.some(g => g && g.join('') === card.join(''));
+            const d = document.createElement('div');
+            d.className = `deck-card ${used ? 'used' : ''}`;
+            d.innerHTML = getCardSVG(card);
+            d.onclick = () => { if (!used && selectedCell !== null) placeCard(card, selectedCell); };
+            deckDiv.appendChild(d);
+        }
+    }
+
+    async function placeCard(card, pos) {
+        grid[pos] = card;
+        document.getElementById(`cell-${pos}`).innerHTML = getCardSVG(card);
+        renderDeck();
+        selectedCell = null;
+        await propagate();
+    }
+
+    async function propagate() {
+        isPropagating = true;
+        let queue = [];
+        for (let i=0; i<81; i++) if (grid[i]) queue.push({card: grid[i], pos: i});
+
+        while (queue.length > 0) {
+            let {card, pos} = queue.shift();
+            for (let set of gridSets[pos]) {
+                let cardB = grid[set.posB], cardC = grid[set.posC];
+                let target = null, partner = null;
+                if (cardB && !cardC) { target = set.posC; partner = set.posB; }
+                else if (!cardB && cardC) { target = set.posB; partner = set.posC; }
+
+                if (target !== null) {
+                    const cA = document.getElementById(`cell-${pos}`), cB = document.getElementById(`cell-${partner}`);
+                    cA.classList.add('forcing'); cB.classList.add('forcing');
+                    await new Promise(r => setTimeout(r, document.getElementById('speed').value));
+                    
+                    const third = grid[pos].map((v, i) => (6 - (v + grid[partner][i])) % 3);
+                    grid[target] = third;
+                    const tCell = document.getElementById(`cell-${target}`);
+                    tCell.innerHTML = getCardSVG(third);
+                    tCell.classList.add('newly-added');
+                    
+                    renderDeck();
+                    cA.classList.remove('forcing'); cB.classList.remove('forcing');
+                    queue.push({card: third, pos: target});
+                }
+            }
+        }
+        isPropagating = false;
+    }
+
+    init();
+</script>
+</body>
+</html>
