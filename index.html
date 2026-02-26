@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SET Super Quilt Generator</title>
     <style>
         :root { 
@@ -9,27 +10,37 @@
             --highlight: #ffeb3b; 
             --user-placed: #28a745;
             --bg: #f8f9fa;
-            --anim-speed: 1000ms; /* Dynamic duration */
+            --anim-speed: 1000ms;
         }
         body { 
             font-family: 'Segoe UI', sans-serif; 
             display: flex; 
             flex-direction: row; 
-            gap: 30px; 
+            gap: 20px; 
             background: var(--bg); 
-            padding: 30px; 
+            padding: 10px; 
             justify-content: center;
+            flex-wrap: wrap;
+            height: 100vh; /* Lock body to screen height */
+            margin: 0;
+            box-sizing: border-box;
+            overflow: hidden; /* Prevent body-level scrolling */
         }
         
+        /* Height-Constrained Grid Container */
         #grid-container { 
             display: grid; 
-            grid-template-columns: repeat(9, 85px); 
-            grid-template-rows: repeat(9, 105px); 
-            gap: 2px; 
+            grid-template-columns: repeat(9, 1fr); 
+            grid-auto-rows: 1fr;
+            height: 85vh; /* Scale based on vertical space to prevent scrolling */
+            max-height: 800px;
+            aspect-ratio: 9 / 10.5; /* Keeps the rectangular card proportion */
+            gap: 1px; 
             background: #999; 
-            border: 5px solid var(--line-color);
+            border: 3px solid var(--line-color);
             box-shadow: 0 12px 30px rgba(0,0,0,0.15);
         }
+
         .cell { 
             background: white; 
             display: flex; 
@@ -37,65 +48,88 @@
             align-items: center; 
             cursor: pointer; 
             border: 0px solid transparent; 
-            transition: background 0.3s; 
             box-sizing: border-box;
             position: relative;
         }
 
-        .cell.selected { outline: 4px solid #007bff; z-index: 10; }
-        .cell.forcing { background: var(--highlight) !important; }
-        
-        /* Prominent Green Border for User Placed */
-        .cell.user-placed { 
-            border: 8px solid var(--user-placed) !important; 
+        .cell svg {
+            width: 90%;
+            height: 90%;
         }
 
-        /* Receding Yellow Border Animation */
+        .cell.selected { outline: 3px solid #007bff; z-index: 10; }
+        .cell.forcing { background: var(--highlight) !important; }
+        .cell.user-placed { border: clamp(3px, 0.5vh, 8px) solid var(--user-placed) !important; }
+
         .cell.newly-added::after {
             content: '';
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
-            border: 30px solid var(--highlight);
+            border: 20px solid var(--highlight);
             pointer-events: none;
             animation: recedingBorder var(--anim-speed) ease-out forwards;
             z-index: 5;
         }
         
         @keyframes recedingBorder {
-            0% { border-width: 35px; opacity: 1; }
-            50% { border-width: 8px; opacity: 1; }
+            0% { border-width: 25px; opacity: 1; }
             100% { border-width: 0px; opacity: 0; }
         }
         
-        /* 3x3 Block Visuals */
-        .cell:nth-child(3n) { border-right: 3px solid var(--line-color); }
+        .cell:nth-child(3n) { border-right: 2px solid var(--line-color); }
         .cell:nth-child(9n) { border-right: none; }
         .cell:nth-child(n+19):nth-child(-n+27), 
-        .cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 3px solid var(--line-color); }
+        .cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 2px solid var(--line-color); }
 
-        .sidebar { width: 340px; display: flex; flex-direction: column; gap: 20px; }
+        .sidebar { 
+            width: 100%; 
+            max-width: 300px; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 10px;
+            max-height: 90vh;
+        }
+
         .controls { 
-            background: white; padding: 20px; border-radius: 12px; 
+            background: white; padding: 12px; border-radius: 12px; 
             box-shadow: 0 4px 10px rgba(0,0,0,0.1); 
         }
+
         .deck-view { 
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; 
-            overflow-y: auto; max-height: 60vh; background: white; 
-            padding: 15px; border-radius: 12px; border: 1px solid #ddd; 
+            display: grid; 
+            grid-template-columns: repeat(3, 1fr); 
+            gap: 5px; 
+            overflow-y: auto; 
+            flex-grow: 1; /* Fills remaining sidebar height */
+            background: white; 
+            padding: 8px; 
+            border-radius: 12px; 
+            border: 1px solid #ddd; 
         }
+
         .deck-card { 
-            padding: 8px; border: 1px solid #eee; cursor: pointer; 
-            border-radius: 6px; display: flex; justify-content: center;
+            aspect-ratio: 3 / 4;
+            border: 1px solid #eee; 
+            cursor: pointer; 
+            border-radius: 4px; 
+            display: flex; 
+            justify-content: center;
+            align-items: center;
         }
+
         .deck-card.used { opacity: 0.1; cursor: not-allowed; filter: grayscale(1); }
         
-        input[type=range] { width: 100%; margin: 10px 0; }
+        input[type=range] { width: 100%; }
         button { 
-            width: 100%; padding: 10px; background: #007bff; color: white; 
+            width: 100%; padding: 8px; background: #007bff; color: white; 
             border: none; border-radius: 6px; font-weight: bold; cursor: pointer;
         }
 
-        svg { width: 70px; height: 90px; }
+        @media (max-width: 900px) {
+            body { overflow-y: auto; height: auto; }
+            #grid-container { width: 95vw; height: auto; aspect-ratio: 9/10.5; }
+            .sidebar { max-width: none; }
+        }
     </style>
 </head>
 <body>
@@ -104,10 +138,10 @@
 
 <div class="sidebar">
     <div class="controls">
-        <h2 style="margin-top:0">Super Quilt</h2>
-        <label>Propagation Speed</label>
+        <h3 style="margin:0 0 5px 0; font-size: 1rem;">Super Quilt</h3>
+        <label style="font-size: 0.8rem;">Propagation Delay</label>
         <input type="range" id="speed" min="100" max="2000" value="600">
-        <button onclick="location.reload()" style="background:#6c757d; margin-top:10px;">Reset Grid</button>
+        <button onclick="location.reload()" style="background:#6c757d; margin-top:5px; font-size: 0.8rem;">Reset Grid</button>
     </div>
     <div id="deck" class="deck-view"></div>
 </div>
@@ -143,7 +177,7 @@
         });
 
         return `
-            <svg viewBox="0 0 40 95">
+            <svg viewBox="0 0 40 95" preserveAspectRatio="xMidYMid meet">
                 <defs>
                     <pattern id="stripes-${colorIdx}" patternUnits="userSpaceOnUse" width="3" height="3" patternTransform="rotate(45)">
                         <line x1="0" y1="0" x2="0" y2="3" stroke="${color}" stroke-width="1.2" />
@@ -181,7 +215,7 @@
     function renderGrid() {
         const container = document.getElementById('grid-container');
         container.innerHTML = '';
-        for (let i=0; i<81; i++) {
+        for (let i = 0; i < 81; i++) {
             const div = document.createElement('div');
             div.className = 'cell';
             div.id = `cell-${i}`;
@@ -223,7 +257,6 @@
     async function propagate(initialQueue) {
         isPropagating = true;
         let queue = initialQueue;
-        
         const getDelay = () => parseInt(document.getElementById('speed').value);
 
         while (queue.length > 0) {
@@ -238,16 +271,12 @@
                 if (target !== null) {
                     const cA = document.getElementById(`cell-${pos}`), cB = document.getElementById(`cell-${partner}`);
                     const delay = getDelay();
-                    const animTime = delay * 2; // Animation duration proportional to speed
-
-                    // Set dynamic animation speed in CSS
+                    const animTime = delay * 2;
                     document.documentElement.style.setProperty('--anim-speed', `${animTime}ms`);
 
-                    // 1. Highlight the forcing pair
                     cA.classList.add('forcing'); 
                     cB.classList.add('forcing');
                     
-                    // 2. Wait based on speed before revealing third card
                     await new Promise(r => setTimeout(r, delay));
                     
                     const third = grid[pos].map((v, i) => (6 - (v + grid[partner][i])) % 3);
@@ -255,20 +284,15 @@
                     const tCell = document.getElementById(`cell-${target}`);
                     tCell.innerHTML = getCardSVG(third);
                     
-                    // 3. Trigger receding border
                     tCell.classList.remove('newly-added');
                     void tCell.offsetWidth; 
                     tCell.classList.add('newly-added');
                     
                     renderDeck();
-                    
-                    // 4. WAIT for the "fading in" (receding) to finish before un-highlighting and moving to next
                     await new Promise(r => setTimeout(r, animTime));
-
                     cA.classList.remove('forcing'); 
                     cB.classList.remove('forcing');
                     
-                    // Add newly forced card to queue to check its own potential sets
                     queue.push({card: third, pos: target});
                 }
             }
