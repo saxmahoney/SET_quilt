@@ -7,10 +7,9 @@
     <style>
         :root { 
             --line-color: #333; 
-            --highlight: #ffeb3b; 
+            --highlight: #ffff3b; 
             --user-placed: #28a745;
             --bg: #f8f9fa;
-            --anim-speed: 1000ms;
         }
         body { 
             font-family: 'Segoe UI', sans-serif; 
@@ -63,21 +62,6 @@
         .cell.selected { outline: 3px solid #007bff; z-index: 10; }
         .cell.forcing { background: var(--highlight) !important; }
         .cell.user-placed { border: clamp(3px, 0.5vh, 8px) solid var(--user-placed) !important; }
-
-        .cell.newly-added::after {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            border: 20px solid var(--highlight);
-            pointer-events: none;
-            animation: recedingBorder var(--anim-speed) ease-out forwards;
-            z-index: 5;
-        }
-        
-        @keyframes recedingBorder {
-            0% { border-width: 25px; opacity: 1; }
-            100% { border-width: 0px; opacity: 0; }
-        }
         
         .cell:nth-child(3n) { border-right: 2px solid var(--line-color); }
         .cell:nth-child(9n) { border-right: none; }
@@ -86,7 +70,7 @@
 
         .sidebar { 
             width: 100%; 
-            max-width: 300px; 
+            max-width: 340px; 
             display: flex; 
             flex-direction: column; 
             gap: 10px;
@@ -96,12 +80,20 @@
         .controls { 
             background: white; padding: 12px; border-radius: 12px; 
             box-shadow: 0 4px 10px rgba(0,0,0,0.1); 
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
 
-        /* COMPACT DECK VIEW */
+        .button-row {
+            display: flex;
+            gap: 6px;
+        }
+
+        /* COMPACT DECK VIEW - 6 columns wide on desktop */
         .deck-view { 
             display: grid; 
-            grid-template-columns: repeat(4, 1fr); /* 4 columns for smaller cards */
+            grid-template-columns: repeat(6, 1fr); 
             gap: 4px; 
             overflow-y: auto; 
             flex-grow: 1; 
@@ -129,7 +121,7 @@
         }
 
         .deck-card svg {
-            width: 80%; /* Smaller internal padding for smaller cards */
+            width: 80%;
             height: 80%;
         }
 
@@ -140,12 +132,13 @@
             width: 100%; padding: 8px; background: #007bff; color: white; 
             border: none; border-radius: 6px; font-weight: bold; cursor: pointer;
         }
+        button:disabled { background: #cccccc; cursor: not-allowed; }
+        button.secondary { background: #6c757d; }
 
         @media (max-width: 900px) {
             body { overflow-y: auto; height: auto; }
             #grid-container { width: 95vw; height: auto; aspect-ratio: 9/10.5; }
             .sidebar { max-width: none; }
-            .deck-view { grid-template-columns: repeat(6, 1fr); } /* More columns on wide mobile */
         }
     </style>
 </head>
@@ -155,10 +148,17 @@
 
 <div class="sidebar">
     <div class="controls">
-        <h3 style="margin:0 0 5px 0; font-size: 1rem;">Super Quilt</h3>
-        <label style="font-size: 0.8rem;">Propagation Delay</label>
-        <input type="range" id="speed" min="100" max="2000" value="600">
-        <button onclick="location.reload()" style="background:#6c757d; margin-top:5px; font-size: 0.8rem;">Reset Grid</button>
+        <h3 style="margin:0 0 2px 0; font-size: 1rem;">SET Quilt</h3>
+        <div class="button-row">
+            <button id="btn-prev" onclick="stepBackward()" disabled>◀ Back</button>
+            <button id="btn-next" onclick="stepForward()" disabled>Next ▶</button>
+        </div>
+        <div class="button-row">
+            <button id="btn-play" onclick="toggleAutoPlay()" class="secondary" disabled>Auto</button>
+            <button onclick="resetGrid()" class="secondary">Reset</button>
+        </div>
+        <label style="font-size: 0.8rem; margin-top: 4px;">Auto Speed</label>
+        <input type="range" id="speed" min="100" max="1500" value="600">
     </div>
     <div id="deck" class="deck-view"></div>
 </div>
@@ -167,7 +167,12 @@
     let grid = Array(81).fill(null);
     let selectedCell = null;
     let gridSets = {};
-    let isPropagating = false;
+    
+    let historySteps = []; 
+    let currentStepIndex = -1; 
+    let subPhase = 1; // 0 = highlighting forcing partners only, 1 = card placed with highlighting
+    let isPlaying = false;
+    let playInterval = null;
 
     const PATHS = [
         "M 10,12 H 30 A 8,8 0 0 1 30,28 H 10 A 8,8 0 0 1 10,12 Z",
@@ -237,7 +242,8 @@
             div.className = 'cell';
             div.id = `cell-${i}`;
             div.onclick = () => {
-                if (grid[i] || isPropagating) return;
+                const isAtLatest = (currentStepIndex === historySteps.length - 1 && (historySteps[currentStepIndex]?.type !== 'deduction' || subPhase === 1)) || currentStepIndex === -1;
+                if (grid[i] || isPlaying || !isAtLatest) return;
                 document.querySelectorAll('.cell').forEach(c => c.classList.remove('selected'));
                 div.classList.add('selected');
                 selectedCell = i;
@@ -256,65 +262,247 @@
             const d = document.createElement('div');
             d.className = `deck-card ${used ? 'used' : ''}`;
             d.innerHTML = getCardSVG(card);
-            d.onclick = () => { if (!used && selectedCell !== null) placeCard(card, selectedCell); };
+            d.onclick = () => { 
+                const isAtLatest = (currentStepIndex === historySteps.length - 1 && (historySteps[currentStepIndex]?.type !== 'deduction' || subPhase === 1)) || currentStepIndex === -1;
+                if (!used && selectedCell !== null && !isPlaying && isAtLatest) {
+                    addUserCard(card, selectedCell);
+                }
+            };
             deckDiv.appendChild(d);
         }
     }
 
-    async function placeCard(card, pos) {
-        grid[pos] = card;
-        const cell = document.getElementById(`cell-${pos}`);
-        cell.innerHTML = getCardSVG(card);
-        cell.classList.add('user-placed');
-        renderDeck();
-        selectedCell = null;
-        await propagate([{card: card, pos: pos}]);
-    }
-
-    async function propagate(initialQueue) {
-        isPropagating = true;
-        let queue = initialQueue;
-        const getDelay = () => parseInt(document.getElementById('speed').value);
-
-        while (queue.length > 0) {
-            let {card, pos} = queue.shift();
+    function findNextDeduction(currentGrid) {
+        for (let pos = 0; pos < 81; pos++) {
+            if (!currentGrid[pos]) continue;
+            let cardA = currentGrid[pos];
             for (let set of gridSets[pos]) {
-                let cardB = grid[set.posB], cardC = grid[set.posC];
-                let target = null, partner = null;
-                
+                let cardB = currentGrid[set.posB];
+                let cardC = currentGrid[set.posC];
+                let target = null;
+                let partner = null;
+
                 if (cardB && !cardC) { target = set.posC; partner = set.posB; }
                 else if (!cardB && cardC) { target = set.posB; partner = set.posC; }
 
-                if (target !== null) {
-                    const cA = document.getElementById(`cell-${pos}`), cB = document.getElementById(`cell-${partner}`);
-                    const delay = getDelay();
-                    const animTime = delay * 2;
-                    document.documentElement.style.setProperty('--anim-speed', `${animTime}ms`);
-
-                    cA.classList.add('forcing'); 
-                    cB.classList.add('forcing');
-                    
-                    await new Promise(r => setTimeout(r, delay));
-                    
-                    const third = grid[pos].map((v, i) => (6 - (v + grid[partner][i])) % 3);
-                    grid[target] = third;
-                    const tCell = document.getElementById(`cell-${target}`);
-                    tCell.innerHTML = getCardSVG(third);
-                    
-                    tCell.classList.remove('newly-added');
-                    void tCell.offsetWidth; 
-                    tCell.classList.add('newly-added');
-                    
-                    renderDeck();
-                    await new Promise(r => setTimeout(r, animTime));
-                    cA.classList.remove('forcing'); 
-                    cB.classList.remove('forcing');
-                    
-                    queue.push({card: third, pos: target});
+                if (target !== null && !currentGrid[target]) {
+                    let third = cardA.map((v, i) => (6 - (v + currentGrid[partner][i])) % 3);
+                    return {
+                        target: target,
+                        card: third,
+                        partner1: pos,
+                        partner2: partner
+                    };
                 }
             }
         }
-        isPropagating = false;
+        return null;
+    }
+
+    function addUserCard(card, pos) {
+        stopAutoPlay();
+        historySteps = historySteps.slice(0, currentStepIndex + 1);
+
+        const step = {
+            type: 'user',
+            pos: pos,
+            card: card
+        };
+
+        historySteps.push(step);
+        currentStepIndex = historySteps.length - 1;
+        subPhase = 1;
+        applyStepState();
+    }
+
+    function applyStepState() {
+        grid.fill(null);
+        
+        for (let i = 0; i < 81; i++) {
+            const cell = document.getElementById(`cell-${i}`);
+            cell.innerHTML = '';
+            cell.className = 'cell';
+        }
+
+        let activeForcingPairs = new Set();
+        let tempGrid = Array(81).fill(null);
+
+        for (let idx = 0; idx <= currentStepIndex; idx++) {
+            let step = historySteps[idx];
+            if (step.type === 'user') {
+                tempGrid[step.pos] = step.card;
+            } else if (step.type === 'deduction') {
+                if (idx === currentStepIndex && subPhase === 0) {
+                    activeForcingPairs.add(step.partner1);
+                    activeForcingPairs.add(step.partner2);
+                } else {
+                    tempGrid[step.target] = step.card;
+                    if (idx === currentStepIndex && subPhase === 1) {
+                        activeForcingPairs.add(step.partner1);
+                        activeForcingPairs.add(step.partner2);
+                    }
+                }
+            }
+        }
+
+        for (let i = 0; i < 81; i++) {
+            if (tempGrid[i]) {
+                grid[i] = tempGrid[i];
+                const cell = document.getElementById(`cell-${i}`);
+                cell.innerHTML = getCardSVG(tempGrid[i]);
+                let isUser = historySteps.some(s => s.type === 'user' && s.pos === i);
+                if (isUser) {
+                    cell.classList.add('user-placed');
+                }
+            }
+        }
+
+        activeForcingPairs.forEach(p => {
+            const c = document.getElementById(`cell-${p}`);
+            if (c) c.classList.add('forcing');
+        });
+
+        renderDeck();
+        selectedCell = null;
+        updateButtonStates();
+    }
+
+    function updateButtonStates() {
+        document.getElementById('btn-prev').disabled = currentStepIndex < 0 || isPlaying;
+        
+        let currStep = historySteps[currentStepIndex];
+        let canStepFwd = false;
+
+        if (currStep && currStep.type === 'deduction' && subPhase === 0) {
+            canStepFwd = true;
+        } else if (currentStepIndex < historySteps.length - 1) {
+            canStepFwd = true;
+        } else {
+            let tempGrid = Array(81).fill(null);
+            for (let i = 0; i <= currentStepIndex; i++) {
+                let s = historySteps[i];
+                if (s.type === 'user') tempGrid[s.pos] = s.card;
+                if (s.type === 'deduction') tempGrid[s.target] = s.card;
+            }
+            if (findNextDeduction(tempGrid)) {
+                canStepFwd = true;
+            }
+        }
+
+        document.getElementById('btn-next').disabled = !canStepFwd || isPlaying;
+
+        const playBtn = document.getElementById('btn-play');
+        let hasCards = historySteps.some(s => s.type === 'user');
+        playBtn.disabled = !hasCards || (!canStepFwd && !isPlaying);
+    }
+
+    function stepForward() {
+        let currStep = historySteps[currentStepIndex];
+
+        if (currStep && currStep.type === 'deduction' && subPhase === 0) {
+            subPhase = 1;
+            applyStepState();
+            return;
+        }
+
+        if (currentStepIndex < historySteps.length - 1) {
+            currentStepIndex++;
+            let nextStep = historySteps[currentStepIndex];
+            subPhase = (nextStep.type === 'deduction') ? 0 : 1;
+            applyStepState();
+        } else {
+            let tempGrid = Array(81).fill(null);
+            for (let i = 0; i <= currentStepIndex; i++) {
+                let s = historySteps[i];
+                if (s.type === 'user') tempGrid[s.pos] = s.card;
+                if (s.type === 'deduction') tempGrid[s.target] = s.card;
+            }
+
+            let deduction = findNextDeduction(tempGrid);
+            if (deduction) {
+                historySteps.push({
+                    type: 'deduction',
+                    target: deduction.target,
+                    card: deduction.card,
+                    partner1: deduction.partner1,
+                    partner2: deduction.partner2
+                });
+                currentStepIndex++;
+                subPhase = 0;
+                applyStepState();
+            }
+        }
+    }
+
+    function stepBackward() {
+        let currStep = historySteps[currentStepIndex];
+
+        if (currStep && currStep.type === 'deduction' && subPhase === 1) {
+            subPhase = 0;
+            applyStepState();
+            return;
+        }
+
+        if (currentStepIndex >= 0) {
+            currentStepIndex--;
+            let prevStep = historySteps[currentStepIndex];
+            subPhase = (prevStep && prevStep.type === 'deduction') ? 1 : 1;
+            applyStepState();
+        }
+    }
+
+    function toggleAutoPlay() {
+        if (isPlaying) {
+            stopAutoPlay();
+        } else {
+            isPlaying = true;
+            document.getElementById('btn-play').innerText = "Pause";
+            updateButtonStates();
+            
+            const getSpeed = () => parseInt(document.getElementById('speed').value);
+            
+            playInterval = setInterval(() => {
+                let currStep = historySteps[currentStepIndex];
+                let canStep = (currStep && currStep.type === 'deduction' && subPhase === 0) || (currentStepIndex < historySteps.length - 1);
+                
+                if (!canStep) {
+                    let tempGrid = Array(81).fill(null);
+                    for (let i = 0; i <= currentStepIndex; i++) {
+                        let s = historySteps[i];
+                        if (s.type === 'user') tempGrid[s.pos] = s.card;
+                        if (s.type === 'deduction') tempGrid[s.target] = s.card;
+                    }
+                    if (findNextDeduction(tempGrid)) {
+                        canStep = true;
+                    }
+                }
+
+                if (canStep) {
+                    stepForward();
+                } else {
+                    stopAutoPlay();
+                }
+            }, 1600 - getSpeed());
+        }
+    }
+
+    function stopAutoPlay() {
+        isPlaying = false;
+        clearInterval(playInterval);
+        const playBtn = document.getElementById('btn-play');
+        if (playBtn) playBtn.innerText = "Auto-Propagate";
+        updateButtonStates();
+    }
+
+    function resetGrid() {
+        stopAutoPlay();
+        grid.fill(null);
+        historySteps = [];
+        currentStepIndex = -1;
+        subPhase = 1;
+        renderGrid();
+        renderDeck();
+        updateButtonStates();
     }
 
     init();
