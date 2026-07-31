@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SET Quilt 3x3 Visualization</title>
+    <style>
+        :root { 
+            --line-color: #333; 
+            --highlight: #ffff3b; 
+            --bg: #f8f9fa;
+        }
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            display: flex; 
+            flex-direction: row; 
+            gap: 30px; 
+            background: var(--bg); 
+            padding: 20px; 
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            min-height: 100vh;
+            margin: 0;
+            box-sizing: border-box;
+        }
+        
+        #grid-container { 
+            display: grid; 
+            grid-template-columns: repeat(3, minmax(0, 1fr)); 
+            grid-template-rows: repeat(3, minmax(0, 1fr)); 
+            width: 480px;
+            aspect-ratio: 3 / 4; /* Matches card aspect ratio (height will be 640px) */
+            background: #999; 
+            border: 3px solid var(--line-color);
+            box-shadow: 0 12px 30px rgba(0,0,0,0.15);
+            gap: 2px;
+        }
+
+        .cell { 
+            background: white; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            position: relative;
+            width: 100%;
+            height: 100%;
+            min-width: 0;
+            min-height: 0;
+            cursor: pointer;
+            overflow: hidden;
+        }
+
+        .cell svg {
+            width: 85%;
+            height: 85%;
+            pointer-events: none;
+        }
+
+        .cell.drag-over {
+            background: #e2e6ea;
+        }
+
+        .cell.highlight {
+            background: var(--highlight) !important;
+        }
+
+        .sidebar { 
+            width: 480px; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 15px;
+            height: 640px; /* Matches grid-container height */
+        }
+
+        .controls { 
+            background: white; 
+            padding: 12px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1); 
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* DECK VIEW - 9 columns wide, 9 rows, no scrollbar */
+        .deck-view { 
+            display: grid; 
+            grid-template-columns: repeat(9, 1fr); 
+            grid-template-rows: repeat(9, 1fr); 
+            gap: 4px; 
+            overflow: hidden; 
+            flex-grow: 1; 
+            background: white; 
+            padding: 8px; 
+            border-radius: 12px; 
+            border: 1px solid #ddd; 
+        }
+
+        .deck-card { 
+            aspect-ratio: 3 / 4;
+            border: 1px solid #eee; 
+            cursor: grab; 
+            border-radius: 4px; 
+            display: flex; 
+            justify-content: center;
+            align-items: center;
+            transition: transform 0.1s, border-color 0.1s;
+            background: white;
+            min-width: 0;
+            min-height: 0;
+        }
+
+        .deck-card:hover:not(.used) {
+            border-color: #007bff;
+            transform: scale(1.05);
+            z-index: 2;
+        }
+
+        .deck-card:active {
+            cursor: grabbing;
+        }
+
+        .deck-card svg {
+            width: 80%;
+            height: 80%;
+            pointer-events: none;
+        }
+
+        .deck-card.used { 
+            opacity: 0.15; 
+            cursor: not-allowed; 
+            filter: grayscale(1); 
+        }
+        
+        button { 
+            padding: 8px 16px; background: #6c757d; color: white; 
+            border: none; border-radius: 6px; font-weight: bold; cursor: pointer;
+        }
+        button:hover { background: #5a6268; }
+
+        @media (max-width: 1020px) {
+            body { flex-direction: column; height: auto; overflow-y: auto; }
+            .sidebar { height: auto; width: 90vw; max-width: 480px; }
+            #grid-container { width: 90vw; max-width: 480px; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="grid-container"></div>
+
+<div class="sidebar">
+    <div class="controls">
+        <h3 style="margin:0; font-size: 1.1rem;">SET Quilt (3x3 View)</h3>
+        <button onclick="resetGrid()">Reset Grid</button>
+    </div>
+    <div id="deck" class="deck-view" ondragover="allowDrop(event)" ondrop="handleDrawerDrop(event)"></div>
+</div>
+
+<script>
+    let grid = Array(9).fill(null);
+    let highlighted = Array(9).fill(false);
+
+    const PATHS = [
+        "M 10,12 H 30 A 8,8 0 0 1 30,28 H 10 A 8,8 0 0 1 10,12 Z",
+        "M 35.1 14.2 C 37.9 20.2, 30.3 26.7, 21.4 24.8 C 17.8 24.1, 14.4 21.5, 9.4 24.5 C 3.5 28.0, 2.1 26.0, 2.0 21.0 C 1.9 16.1, 6.7 12.8, 12.4 13.4 C 20.1 14.3, 21.1 18.7, 30.1 13.9 C 32.2 12.8, 34.1 12.0, 35.1 14.2 Z",
+        "M 20,8 L 36,20 L 20,32 L 4,20 Z"
+    ];
+    const COLORS = ["#ef233c", "#7209b7", "#38b000"];
+
+    function getCardSVG(card) {
+        const [shapeIdx, colorIdx, numIdx, shadeIdx] = card;
+        const color = COLORS[colorIdx];
+        const path = PATHS[shapeIdx];
+        const count = numIdx + 1;
+        
+        let fill = color;
+        if (shadeIdx === 1) fill = `url(#stripes-${colorIdx})`;
+        if (shadeIdx === 2) fill = "none";
+
+        let shapes = "";
+        const offsets = count === 1 ? [25] : count === 2 ? [10, 40] : [-5, 25, 55];
+        
+        offsets.forEach(y => {
+            shapes += `<path d="${path}" transform="translate(0, ${y})" fill="${fill}" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" />`;
+        });
+
+        return `
+            <svg viewBox="0 0 40 95" preserveAspectRatio="xMidYMid meet">
+                <defs>
+                    <pattern id="stripes-${colorIdx}" patternUnits="userSpaceOnUse" width="3" height="3" patternTransform="rotate(45)">
+                        <line x1="0" y1="0" x2="0" y2="3" stroke="${color}" stroke-width="1.2" />
+                    </pattern>
+                </defs>
+                ${shapes}
+            </svg>`;
+    }
+
+    function init() {
+        render();
+    }
+
+    function render() {
+        renderGrid();
+        renderDeck();
+    }
+
+    function renderGrid() {
+        const container = document.getElementById('grid-container');
+        container.innerHTML = '';
+        
+        for (let i = 0; i < 9; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'cell';
+            cell.id = `cell-${i}`;
+            
+            if (highlighted[i]) {
+                cell.classList.add('highlight');
+            }
+
+            cell.addEventListener('click', () => {
+                highlighted[i] = !highlighted[i];
+                cell.classList.toggle('highlight', highlighted[i]);
+            });
+            
+            cell.addEventListener('dragover', allowDrop);
+            cell.addEventListener('dragenter', () => cell.classList.add('drag-over'));
+            cell.addEventListener('dragleave', () => cell.classList.remove('drag-over'));
+            cell.addEventListener('drop', (e) => {
+                cell.classList.remove('drag-over');
+                handleCellDrop(e, i);
+            });
+
+            const card = grid[i];
+            if (card) {
+                cell.innerHTML = getCardSVG(card);
+                cell.draggable = true;
+                cell.addEventListener('dragstart', (e) => {
+                    const payload = { card: card, source: 'grid', gridIndex: i };
+                    e.dataTransfer.setData('application/json', JSON.stringify(payload));
+                });
+            } else {
+                cell.innerHTML = '';
+            }
+            
+            container.appendChild(cell);
+        }
+    }
+
+    function renderDeck() {
+        const deckDiv = document.getElementById('deck');
+        deckDiv.innerHTML = '';
+
+        const fullDeck = [];
+        for (let R=0; R<3; R++) for (let C=0; C<3; C++) 
+        for (let r=0; r<3; r++) for (let c=0; c<3; c++) fullDeck.push([R, C, r, c]);
+
+        fullDeck.forEach(card => {
+            const used = grid.some(g => g && g.join('') === card.join(''));
+            const d = document.createElement('div');
+            d.className = `deck-card ${used ? 'used' : ''}`;
+            d.innerHTML = getCardSVG(card);
+            
+            if (!used) {
+                d.draggable = true;
+                d.addEventListener('dragstart', (e) => {
+                    const payload = { card: card, source: 'deck', gridIndex: null };
+                    e.dataTransfer.setData('application/json', JSON.stringify(payload));
+                });
+            }
+            
+            deckDiv.appendChild(d);
+        });
+    }
+
+    function allowDrop(e) {
+        e.preventDefault();
+    }
+
+    function handleCellDrop(e, targetCellIndex) {
+        e.preventDefault();
+        const dataStr = e.dataTransfer.getData('application/json');
+        if (!dataStr) return;
+        const data = JSON.parse(dataStr);
+
+        const currentCardInTarget = grid[targetCellIndex];
+
+        grid[targetCellIndex] = data.card;
+
+        if (data.source === 'grid' && data.gridIndex !== null) {
+            if (data.gridIndex !== targetCellIndex) {
+                grid[data.gridIndex] = currentCardInTarget;
+            }
+        }
+
+        render();
+    }
+
+    function handleDrawerDrop(e) {
+        e.preventDefault();
+        const dataStr = e.dataTransfer.getData('application/json');
+        if (!dataStr) return;
+        const data = JSON.parse(dataStr);
+
+        if (data.source === 'grid' && data.gridIndex !== null) {
+            grid[data.gridIndex] = null;
+            render();
+        }
+    }
+
+    function resetGrid() {
+        grid.fill(null);
+        highlighted.fill(false);
+        render();
+    }
+
+    init();
+</script>
+</body>
+</html>
