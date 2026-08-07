@@ -26,6 +26,12 @@
             overflow: hidden; 
         }
         
+        .left-pane {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
         #grid-container { 
             display: grid; 
             grid-template-columns: repeat(9, 11.11%); 
@@ -38,6 +44,22 @@
             border: 3px solid var(--line-color);
             box-shadow: 0 12px 30px rgba(0,0,0,0.15);
             overflow: hidden;
+        }
+
+        .info-panel {
+            background: white;
+            padding: 8px 12px;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            font-size: 0.85rem;
+            box-sizing: border-box;
+        }
+
+        .info-panel summary {
+            font-weight: bold;
+            cursor: pointer;
+            color: #333;
+            user-select: none;
         }
 
         .cell { 
@@ -144,7 +166,18 @@
 </head>
 <body>
 
-<div id="grid-container"></div>
+<div class="left-pane">
+    <div id="grid-container"></div>
+    <details class="info-panel">
+        <summary>Additional Information</summary>
+        <p style="margin: 6px 0 0 0; color: #555;"><i>SET</i> designed by Marsha Falco (1974). Quilt variant by <a href="https://drive.google.com/file/d/1Qn-BFygL9QmiqTBnrRvI7qi_6b-dL4ht/view">Brian Conrey and Brianna Donaldson</a>.</p>
+<p style="margin: 6px 0 0 0; color: #555;">
+    <a href="https://github.com/saxmahoney/SET_quilt">Github Source Code</a>, 
+    <a href="https://raw.githubusercontent.com/saxmahoney/SET_quilt/main/instructions.docx">Activity Instructions</a>, 
+    <a href="https://saxmahoney.github.io/SET_quilt/3x3.html">3 x 3 demo</a>
+</p>
+    </details>
+</div>
 
 <div class="sidebar">
     <div class="controls">
